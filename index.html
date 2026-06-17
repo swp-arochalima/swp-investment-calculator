@@ -153,7 +153,7 @@ body{
     <figcaption class="irc-chart-title">Your Contributions and Investment Growth</figcaption>
     <ul class="irc-legend">
       <li><span class="sw sw-ret"></span>Investment return</li>
-      <li><span class="sw sw-con"></span>Contributions</li>
+      <li><span class="sw sw-con"></span>Money invested</li>
     </ul>
     <div class="irc-chart-wrap" id="ircChart" role="img" aria-label=""></div>
   </figure>
@@ -199,7 +199,7 @@ body{
       </div>
       <input class="irc-range" id="ircRateRange" type="range" min="0" max="12" step="0.1" value="4.5"
              aria-label="Annual rate of return slider, zero to twelve percent">
-      <p class="irc-helper">This is your assumption to set &mdash; past performance is no guide to future returns.</p>
+      <p class="irc-helper">Enter a nominal (before-inflation) return &mdash; inflation is handled separately below, so don&rsquo;t subtract it here. Past performance is no guide to future returns.</p>
     </div>
 
     <div class="irc-field">
@@ -219,6 +219,10 @@ body{
     <div class="irc-srow main">
       <span class="irc-srow-label">Ending portfolio value</span>
       <span class="irc-srow-val" id="ircOutEnding">&pound;0</span>
+    </div>
+    <div class="irc-srow">
+      <span class="irc-srow-label">Starting balance</span>
+      <span class="irc-srow-val" id="ircOutStart">&pound;0</span>
     </div>
     <div class="irc-srow">
       <span class="irc-srow-label">Total contributions</span>
@@ -266,6 +270,7 @@ body{
     inflInput:    document.getElementById('ircInflInput'),
     chart:        document.getElementById('ircChart'),
     outEnding:    document.getElementById('ircOutEnding'),
+    outStart:     document.getElementById('ircOutStart'),
     outContrib:   document.getElementById('ircOutContrib'),
     outReturns:   document.getElementById('ircOutReturns'),
     outReal:      document.getElementById('ircOutReal')
@@ -393,20 +398,41 @@ body{
     var svg = '<svg viewBox="0 0 '+VW+' '+VH.toFixed(1)+'" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">'+parts.join('')+'</svg>';
     el.chart.innerHTML = svg;
     el.chart.setAttribute('aria-label',
-      'Stacked area chart. Over '+n+' year'+(n===1?'':'s')+', total contributions of '+gbp(end.contrib)+
-      ' are projected to grow to '+gbp(end.value)+', including '+gbp(end.ret)+' of investment returns.');
+      'Stacked area chart. Over '+n+' year'+(n===1?'':'s')+', '+gbp(end.contrib)+
+      ' of money invested is projected to grow to '+gbp(end.value)+', including '+gbp(end.ret)+' of investment returns.');
   }
 
   /* ---------- summary ---------- */
+  /* Split "money in" into the opening balance (which may itself already contain
+     past contributions and growth) and the NEW contributions added over the horizon,
+     so neither figure is overstated:
+        starting balance         = P
+        additional contributions = C * n
+        investment returns        = ending value - (P + C*n)   [growth on both]
+     The three add up to the ending value. Percentages are whole numbers,
+     apportioned (largest-remainder) so they always sum to exactly 100. */
+  function pctParts(vals, total){
+    if(total <= 0) return vals.map(function(){ return 0; });
+    var raw = vals.map(function(v){ return v/total*100; });
+    var out = raw.map(function(x){ return Math.floor(x); });
+    var left = 100 - out.reduce(function(a,b){ return a+b; }, 0);
+    raw.map(function(x,i){ return { i:i, frac:x-Math.floor(x) }; })
+       .sort(function(a,b){ return b.frac - a.frac; })
+       .forEach(function(o,k){ if(k < left) out[o.i]++; });
+    return out;
+  }
   function renderSummary(s){
-    var end = s[s.length-1];
-    var contribPct = end.value>0 ? Math.round(end.contrib/end.value*100) : 0;
-    var returnsPct = 100 - contribPct;
+    var end      = s[s.length-1];
+    var startBal = state.start;
+    var added    = state.contrib * state.years;   // new money paid in over the horizon
+    var returns  = end.ret;                        // growth on starting balance AND contributions
+    var p = pctParts([startBal, added, returns], end.value);
     var real = end.value / Math.pow(1 + state.infl/100, state.years);
     el.outEnding.textContent = gbp(end.value);
-    el.outContrib.innerHTML = gbp(end.contrib) + ' <span class="pct">(' + contribPct + '% of ending value)</span>';
-    el.outReturns.innerHTML = gbp(end.ret) + ' <span class="pct">(' + returnsPct + '% of ending value)</span>';
-    el.outReal.innerHTML   = gbp(real) + ' <span class="pct">(after ' + dispPct(state.infl) + ' inflation)</span>';
+    el.outStart.innerHTML   = gbp(startBal) + ' <span class="pct">(' + p[0] + '% of ending value)</span>';
+    el.outContrib.innerHTML = gbp(added)    + ' <span class="pct">(' + p[1] + '% of ending value)</span>';
+    el.outReturns.innerHTML = gbp(returns)  + ' <span class="pct">(' + p[2] + '% of ending value)</span>';
+    el.outReal.innerHTML    = gbp(real)     + ' <span class="pct">(after ' + dispPct(state.infl) + ' inflation)</span>';
   }
 
   /* ---------- slider fill ---------- */
